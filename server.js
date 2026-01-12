@@ -11,21 +11,43 @@ const app = express();
 // Enable CORS
 app.use(cors());
 
-app.use(bodyParser.text({ type: 'text/html' }));
+app.use(bodyParser.text({ type: 'text/html', limit: '10mb' }));
+
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.send('Resume File Host API is running!');
+});
 
 app.post('/generate-pdf', async (req, res) => {
     const html = req.body;
-    const height = req.query.height || '800px'; // Get the height from query params, default to 1370px if not provided
+    const height = req.query.height || '800px';
 
     if (!html) {
         return res.status(400).send('HTML content is required');
     }
 
+    let browser = null;
     try {
-        const browser = await puppeteer.launch({
+        const launchOptions = {
             headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+            ]
+        };
+        
+        // Use system Chromium if available (for Docker/Render)
+        if (process.env.PUPPETEER_EXECUTABLE_PATH) {
+            launchOptions.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+        }
+        
+        browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
 
@@ -63,7 +85,13 @@ app.post('/generate-pdf', async (req, res) => {
         res.send(pdfBuffer);
     } catch (error) {
         console.error('Error generating PDF:', error);
-        res.status(500).send('Internal Server Error');
+        if (browser) {
+            await browser.close();
+        }
+        res.status(500).json({ 
+            error: 'Failed to generate PDF', 
+            message: error.message 
+        });
     }
 });
 
