@@ -5,6 +5,7 @@ const cors = require('cors');
 const htmlDocx = require('html-docx-js');
 const htmlToDocx = require('html-to-docx');
 const fs = require('fs');
+const path = require('path');
 
 const app = express();
 
@@ -13,18 +14,33 @@ app.use(cors());
 
 app.use(bodyParser.text({ type: 'text/html', limit: '10mb' }));
 
+// Serve static fonts
+app.use('/fonts', express.static(path.join(__dirname, 'fonts')));
+
 // Health check endpoint
 app.get('/', (req, res) => {
     res.send('Resume File Host API is running!');
 });
 
-// CSS to map custom font names to Google Fonts
-const FONT_MAPPING_CSS = `
-    /* Map custom fonts to Google Fonts equivalents */
-    * {
-        font-family: 'DM Sans', 'Inter', sans-serif;
+// Load fonts as base64 for embedding in PDF
+const loadFontAsBase64 = (fontPath) => {
+    try {
+        const fontBuffer = fs.readFileSync(fontPath);
+        return fontBuffer.toString('base64');
+    } catch (error) {
+        console.error(`Error loading font: ${fontPath}`, error);
+        return null;
     }
-`;
+};
+
+// Load fonts at startup
+const avertaDemoFont = loadFontAsBase64(path.join(__dirname, 'fonts', 'FontsFree-Net-AvertaDemoPECuttedDemo-Regular.ttf'));
+const avertaBoldFont = loadFontAsBase64(path.join(__dirname, 'fonts', 'Averta CY W01 Bold.ttf'));
+
+console.log('Fonts loaded:', { 
+    avertaDemo: avertaDemoFont ? 'OK' : 'FAILED', 
+    avertaBold: avertaBoldFont ? 'OK' : 'FAILED' 
+});
 
 app.post('/generate-pdf', async (req, res) => {
     const html = req.body;
@@ -34,7 +50,23 @@ app.post('/generate-pdf', async (req, res) => {
         return res.status(400).send('HTML content is required');
     }
 
-    // Wrap HTML with Google Fonts
+    // Build font CSS with embedded base64 fonts
+    const fontCSS = `
+        @font-face {
+            font-family: 'Averta Demo PE Cutted Demo';
+            src: url(data:font/truetype;base64,${avertaDemoFont}) format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Averta CY W01';
+            src: url(data:font/truetype;base64,${avertaBoldFont}) format('truetype');
+            font-weight: bold;
+            font-style: normal;
+        }
+    `;
+
+    // Wrap HTML with embedded fonts + Google Fonts for fallbacks
     const htmlWithFonts = `
         <!DOCTYPE html>
         <html>
@@ -42,14 +74,21 @@ app.post('/generate-pdf', async (req, res) => {
             <meta charset="UTF-8">
             <link rel="preconnect" href="https://fonts.googleapis.com">
             <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-            <link href="https://fonts.googleapis.com/css2?family=Baskervville:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+            <link href="https://fonts.googleapis.com/css2?family=Baskervville:ital@0;1&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
             <style>
-                /* Font aliases - map custom font names to Google Fonts */
-                [style*="Averta Demo PE Cutted Demo"] { font-family: 'DM Sans', sans-serif !important; }
-                [style*="Averta CY W01"] { font-family: 'DM Sans', sans-serif !important; }
-                [style*="New York"] { font-family: 'Libre Baskerville', serif !important; }
-                [style*="SF Pro Display"] { font-family: 'Inter', sans-serif !important; }
-                ${FONT_MAPPING_CSS}
+                ${fontCSS}
+                
+                /* Fallback fonts for New York and SF Pro Display */
+                @font-face {
+                    font-family: 'New York';
+                    src: local('Libre Baskerville'), local('Georgia');
+                    font-weight: 100 900;
+                }
+                @font-face {
+                    font-family: 'SF Pro Display';
+                    src: local('Inter'), local('Arial');
+                    font-weight: 100 900;
+                }
             </style>
         </head>
         <body>
@@ -88,31 +127,8 @@ app.post('/generate-pdf', async (req, res) => {
         // Wait a bit more for fonts to fully render
         await page.evaluate(() => document.fonts.ready);
 
-        // Replace custom fonts with Google Fonts equivalents
+        // Add print styles for proper rendering
         await page.evaluate(() => {
-            // Font replacement map
-            const fontMap = {
-                'Averta Demo PE Cutted Demo': "'DM Sans', sans-serif",
-                'Averta CY W01': "'DM Sans', sans-serif",
-                'New York': "'Libre Baskerville', serif",
-                'SF Pro Display': "'Inter', sans-serif"
-            };
-            
-            // Replace fonts in all elements with inline styles
-            document.querySelectorAll('*').forEach(el => {
-                const style = el.getAttribute('style');
-                if (style) {
-                    let newStyle = style;
-                    for (const [oldFont, newFont] of Object.entries(fontMap)) {
-                        newStyle = newStyle.replace(new RegExp(oldFont, 'gi'), newFont);
-                    }
-                    if (newStyle !== style) {
-                        el.setAttribute('style', newStyle);
-                    }
-                }
-            });
-            
-            // Add print styles
             const printStyle = document.createElement('style');
             printStyle.innerHTML = `
                 * {
@@ -123,7 +139,7 @@ app.post('/generate-pdf', async (req, res) => {
                     background-color: rgb(255, 255, 249) !important;
                 }
                 b, strong {
-                    font-family: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important;
+                    font-family: 'Averta CY W01', 'Averta Demo PE Cutted Demo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important;
                     font-weight: 700 !important;
                 }
             `;
