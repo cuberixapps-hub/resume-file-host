@@ -18,6 +18,37 @@ app.get('/', (req, res) => {
     res.send('Resume File Host API is running!');
 });
 
+// Google Fonts to inject for PDF generation
+const GOOGLE_FONTS_CSS = `
+    @import url('https://fonts.googleapis.com/css2?family=Baskervville:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Inter:wght@300;400;500;600;700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap');
+    
+    /* Map custom fonts to Google Fonts equivalents */
+    @font-face {
+        font-family: 'Averta Demo PE Cutted Demo';
+        src: local('DM Sans'), local('Inter');
+        font-weight: 100 900;
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'Averta CY W01';
+        src: local('DM Sans'), local('Inter');
+        font-weight: 100 900;
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'New York';
+        src: local('Libre Baskerville'), local('Source Serif 4');
+        font-weight: 100 900;
+        font-style: normal;
+    }
+    @font-face {
+        font-family: 'SF Pro Display';
+        src: local('Inter'), local('DM Sans');
+        font-weight: 100 900;
+        font-style: normal;
+    }
+`;
+
 app.post('/generate-pdf', async (req, res) => {
     const html = req.body;
     const height = req.query.height || '800px';
@@ -25,6 +56,23 @@ app.post('/generate-pdf', async (req, res) => {
     if (!html) {
         return res.status(400).send('HTML content is required');
     }
+
+    // Wrap HTML with Google Fonts
+    const htmlWithFonts = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Baskervville:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Inter:wght@300;400;500;600;700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&display=swap" rel="stylesheet">
+            <style>${GOOGLE_FONTS_CSS}</style>
+        </head>
+        <body>
+            ${html}
+        </body>
+        </html>
+    `;
 
     let browser = null;
     try {
@@ -49,7 +97,12 @@ app.post('/generate-pdf', async (req, res) => {
         
         browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+        
+        // Set content and wait for fonts to load
+        await page.setContent(htmlWithFonts, { waitUntil: 'networkidle0' });
+        
+        // Wait a bit more for fonts to fully render
+        await page.evaluate(() => document.fonts.ready);
 
         // Ensure all styles are applied correctly, including background colors and bold text
         await page.evaluate(() => {
@@ -60,10 +113,10 @@ app.post('/generate-pdf', async (req, res) => {
                     print-color-adjust: exact !important;
                 }
                 body, html {
-                    background-color: rgb(255, 255, 249) !important; /* Set the desired background color */
+                    background-color: rgb(255, 255, 249) !important;
                 }
                 b, strong {
-                    font-family: 'Averta CY W01', 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important;
+                    font-family: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif !important;
                     font-weight: 700 !important;
                 }
             `;
